@@ -42,7 +42,7 @@
         <SwitchPreference
             android:key="byedpi_enable_cmd_settings"
             android:title="@string/use_command_line_settings"
-            android:defaultValue="false" />
+            android:defaultValue="true" />
 
         <Preference
             android:key="byedpi_ui_settings"
@@ -77,5 +77,11 @@
         </Preference>
 
     </androidx.preference.PreferenceCategory>
+
+    <!-- The toolbar overflow menu is unreachable with a D-pad, so TV gets an in-list entry. -->
+    <Preference
+        android:key="reset_settings"
+        android:title="@string/reset_settings"
+        app:isPreferenceVisible="@bool/is_tv" />
 
 </PreferenceScreen>

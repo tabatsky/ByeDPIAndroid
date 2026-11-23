@@ -1,0 +1,900 @@
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 3dd4840..2856db7 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -16,7 +16,7 @@
+         android:dataExtractionRules="@xml/data_extraction_rules"
+         android:fullBackupContent="@xml/backup_rules"
+         android:icon="@mipmap/ic_launcher"
+-        android:banner="@mipmap/ic_launcher_foreground"
++        android:banner="@drawable/tv_banner"
+         android:logo="@mipmap/ic_launcher"
+         android:label="@string/app_name"
+         android:roundIcon="@mipmap/ic_launcher_round"
+diff --git a/app/src/main/java/io/github/dovecoteescapee/byedpi/activities/MainActivity.kt b/app/src/main/java/io/github/dovecoteescapee/byedpi/activities/MainActivity.kt
+index 45584a6..760c950 100644
+--- a/app/src/main/java/io/github/dovecoteescapee/byedpi/activities/MainActivity.kt
++++ b/app/src/main/java/io/github/dovecoteescapee/byedpi/activities/MainActivity.kt
+@@ -2,6 +2,7 @@ package io.github.dovecoteescapee.byedpi.activities
+ 
+ import android.Manifest
+ import android.annotation.SuppressLint
++import android.content.ActivityNotFoundException
+ import android.content.BroadcastReceiver
+ import android.content.Context
+ import android.content.Intent
+@@ -27,6 +28,8 @@ import io.github.dovecoteescapee.byedpi.services.appStatus
+ import io.github.dovecoteescapee.byedpi.utility.*
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.launch
++import kotlinx.coroutines.withContext
++import java.io.File
+ import java.io.IOException
+ 
+ class MainActivity : AppCompatActivity() {
+@@ -122,10 +125,21 @@ class MainActivity : AppCompatActivity() {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
++        applyTvThemeOverlay()
+ 
+         binding = ActivityMainBinding.inflate(layoutInflater)
+         setContentView(binding.root)
+ 
++        // The TV layout (layout-television) has on-screen buttons instead of toolbar actions,
++        // which can't be reached with a D-pad.
++        val settingsButton = binding.settingsButton
++        val logsButton = binding.logsButton
++        if (settingsButton != null && logsButton != null) {
++            supportActionBar?.hide()
++            settingsButton.setOnClickListener { openSettings() }
++            logsButton.setOnClickListener { saveLogs() }
++        }
++
+         val intentFilter = IntentFilter().apply {
+             addAction(STARTED_BROADCAST)
+             addAction(STOPPED_BROADCAST)
+@@ -176,35 +190,70 @@ class MainActivity : AppCompatActivity() {
+         return true
+     }
+ 
+-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+-        val (status, _) = appStatus
+-
+-        return when (item.itemId) {
++    override fun onOptionsItemSelected(item: MenuItem): Boolean =
++        when (item.itemId) {
+             R.id.action_settings -> {
+-                if (status == AppStatus.Halted) {
+-                    val intent = Intent(this, SettingsActivity::class.java)
+-                    startActivity(intent)
+-                } else {
+-                    Toast.makeText(this, R.string.settings_unavailable, Toast.LENGTH_SHORT)
+-                        .show()
+-                }
++                openSettings()
+                 true
+             }
+ 
+             R.id.action_save_logs -> {
+-                val intent =
+-                    Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+-                        addCategory(Intent.CATEGORY_OPENABLE)
+-                        type = "text/plain"
+-                        putExtra(Intent.EXTRA_TITLE, "byedpi.log")
+-                    }
+-
+-                logsRegister.launch(intent)
++                saveLogs()
+                 true
+             }
+ 
+             else -> super.onOptionsItemSelected(item)
+         }
++
++    private fun openSettings() {
++        val (status, _) = appStatus
++
++        if (status == AppStatus.Halted) {
++            startActivity(Intent(this, SettingsActivity::class.java))
++        } else {
++            Toast.makeText(this, R.string.settings_unavailable, Toast.LENGTH_SHORT).show()
++        }
++    }
++
++    private fun saveLogs() {
++        val intent =
++            Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
++                addCategory(Intent.CATEGORY_OPENABLE)
++                type = "text/plain"
++                putExtra(Intent.EXTRA_TITLE, "byedpi.log")
++            }
++
++        try {
++            logsRegister.launch(intent)
++        } catch (e: ActivityNotFoundException) {
++            // Most Android TV firmwares ship without a document picker.
++            Log.w(TAG, "No document picker available, saving logs to app storage", e)
++            saveLogsToAppStorage()
++        }
++    }
++
++    private fun saveLogsToAppStorage() {
++        lifecycleScope.launch(Dispatchers.IO) {
++            val logs = collectLogs()
++
++            val message = if (logs == null) {
++                getString(R.string.logs_failed)
++            } else {
++                try {
++                    val dir = getExternalFilesDir(null) ?: filesDir
++                    val file = File(dir, "byedpi.log")
++                    file.writeText(logs)
++                    getString(R.string.logs_saved_to, file.absolutePath)
++                } catch (e: IOException) {
++                    Log.e(TAG, "Failed to save logs", e)
++                    getString(R.string.logs_failed)
++                }
++            }
++
++            withContext(Dispatchers.Main) {
++                Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
++            }
++        }
+     }
+ 
+     private fun start() {
+diff --git a/app/src/main/java/io/github/dovecoteescapee/byedpi/activities/SettingsActivity.kt b/app/src/main/java/io/github/dovecoteescapee/byedpi/activities/SettingsActivity.kt
+index 880cc7d..fcc02fd 100644
+--- a/app/src/main/java/io/github/dovecoteescapee/byedpi/activities/SettingsActivity.kt
++++ b/app/src/main/java/io/github/dovecoteescapee/byedpi/activities/SettingsActivity.kt
+@@ -7,11 +7,13 @@ import androidx.appcompat.app.AppCompatActivity
+ import androidx.fragment.app.FragmentManager
+ import io.github.dovecoteescapee.byedpi.R
+ import io.github.dovecoteescapee.byedpi.fragments.MainSettingsFragment
++import io.github.dovecoteescapee.byedpi.utility.applyTvThemeOverlay
+ import io.github.dovecoteescapee.byedpi.utility.getPreferences
+ 
+ class SettingsActivity : AppCompatActivity() {
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
++        applyTvThemeOverlay()
+         setContentView(R.layout.activity_settings)
+ 
+         supportFragmentManager
+@@ -34,16 +36,20 @@ class SettingsActivity : AppCompatActivity() {
+         }
+ 
+         R.id.action_reset_settings -> {
+-            getPreferences().edit().clear().apply()
+-
+-            supportFragmentManager.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE)
+-            supportFragmentManager
+-                .beginTransaction()
+-                .replace(R.id.settings, MainSettingsFragment())
+-                .commit()
++            resetSettings()
+             true
+         }
+ 
+         else -> super.onOptionsItemSelected(item)
+     }
+-}
+\ No newline at end of file
++
++    fun resetSettings() {
++        getPreferences().edit().clear().apply()
++
++        supportFragmentManager.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE)
++        supportFragmentManager
++            .beginTransaction()
++            .replace(R.id.settings, MainSettingsFragment())
++            .commit()
++    }
++}
+diff --git a/app/src/main/java/io/github/dovecoteescapee/byedpi/core/ByeDpiProxyPreferences.kt b/app/src/main/java/io/github/dovecoteescapee/byedpi/core/ByeDpiProxyPreferences.kt
+index 6df4c1c..7323915 100644
+--- a/app/src/main/java/io/github/dovecoteescapee/byedpi/core/ByeDpiProxyPreferences.kt
++++ b/app/src/main/java/io/github/dovecoteescapee/byedpi/core/ByeDpiProxyPreferences.kt
+@@ -7,7 +7,7 @@ import io.github.dovecoteescapee.byedpi.utility.shellSplit
+ sealed interface ByeDpiProxyPreferences {
+     companion object {
+         fun fromSharedPreferences(preferences: SharedPreferences): ByeDpiProxyPreferences =
+-            when (preferences.getBoolean("byedpi_enable_cmd_settings", false)) {
++            when (preferences.getBoolean("byedpi_enable_cmd_settings", true)) {
+                 true -> ByeDpiProxyCmdPreferences(preferences)
+                 false -> ByeDpiProxyUIPreferences(preferences)
+             }
+@@ -20,11 +20,15 @@ class ByeDpiProxyCmdPreferences(val args: Array<String>) : ByeDpiProxyPreference
+     constructor(preferences: SharedPreferences) : this(
+         preferences.getStringNotNull(
+             "byedpi_cmd_args",
+-            ""
++            DEFAULT_CMD_ARGS
+         )
+     )
+ 
+     companion object {
++        /** Keep in sync with @string/byedpi_default_cmd_args. */
++        const val DEFAULT_CMD_ARGS =
++            "-Ku -a1 -An -d1 -s0+s -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -At,r,s -s1 -q1 -At,r,s -s5 -o25000+s -At,r,s -o1 -d1 -r1+s -t10 -b1500 -s0+s -d3+s -At,r,s -f-1 -r1+s -At,r,s -s1 -o1+s -s-1"
++
+         private fun cmdToArgs(cmd: String): Array<String> {
+             val firstArgIndex = cmd.indexOf("-")
+             val argsStr = (if (firstArgIndex > 0) cmd.substring(firstArgIndex) else cmd).trim()
+diff --git a/app/src/main/java/io/github/dovecoteescapee/byedpi/fragments/MainSettingsFragment.kt b/app/src/main/java/io/github/dovecoteescapee/byedpi/fragments/MainSettingsFragment.kt
+index e3d4caa..6a0687f 100644
+--- a/app/src/main/java/io/github/dovecoteescapee/byedpi/fragments/MainSettingsFragment.kt
++++ b/app/src/main/java/io/github/dovecoteescapee/byedpi/fragments/MainSettingsFragment.kt
+@@ -5,8 +5,10 @@ import android.os.Bundle
+ import android.util.Log
+ import androidx.appcompat.app.AppCompatDelegate
+ import androidx.preference.*
++import com.google.android.material.dialog.MaterialAlertDialogBuilder
+ import io.github.dovecoteescapee.byedpi.BuildConfig
+ import io.github.dovecoteescapee.byedpi.R
++import io.github.dovecoteescapee.byedpi.activities.SettingsActivity
+ import io.github.dovecoteescapee.byedpi.data.Mode
+ import io.github.dovecoteescapee.byedpi.utility.*
+ 
+@@ -68,6 +70,19 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
+ 
+         findPreferenceNotNull<Preference>("version").summary = BuildConfig.VERSION_NAME
+ 
++        // TV only (the preference is hidden elsewhere): the toolbar menu can't be reached with a D-pad.
++        findPreferenceNotNull<Preference>("reset_settings")
++            .setOnPreferenceClickListener {
++                MaterialAlertDialogBuilder(requireContext())
++                    .setMessage(R.string.reset_settings_confirm)
++                    .setPositiveButton(R.string.reset_settings) { _, _ ->
++                        (activity as? SettingsActivity)?.resetSettings()
++                    }
++                    .setNegativeButton(android.R.string.cancel, null)
++                    .show()
++                true
++            }
++
+         updatePreferences()
+     }
+ 
+diff --git a/app/src/main/java/io/github/dovecoteescapee/byedpi/utility/TvUtils.kt b/app/src/main/java/io/github/dovecoteescapee/byedpi/utility/TvUtils.kt
+new file mode 100644
+index 0000000..9222a2f
+--- /dev/null
++++ b/app/src/main/java/io/github/dovecoteescapee/byedpi/utility/TvUtils.kt
+@@ -0,0 +1,15 @@
++package io.github.dovecoteescapee.byedpi.utility
++
++import android.app.Activity
++import android.content.Context
++import io.github.dovecoteescapee.byedpi.R
++
++/** True when running on a device whose UI mode is "television" (see values-television). */
++fun Context.isTv(): Boolean = resources.getBoolean(R.bool.is_tv)
++
++/** Call before setContentView. Adds visible focus highlights for D-pad navigation. */
++fun Activity.applyTvThemeOverlay() {
++    if (isTv()) {
++        theme.applyStyle(R.style.ThemeOverlay_ByeDPI_Tv, true)
++    }
++}
+diff --git a/app/src/main/res/animator/tv_focus_scale.xml b/app/src/main/res/animator/tv_focus_scale.xml
+new file mode 100644
+index 0000000..4fc5be3
+--- /dev/null
++++ b/app/src/main/res/animator/tv_focus_scale.xml
+@@ -0,0 +1,31 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_focused="true">
++        <set>
++            <objectAnimator
++                android:duration="150"
++                android:propertyName="scaleX"
++                android:valueTo="1.06"
++                android:valueType="floatType" />
++            <objectAnimator
++                android:duration="150"
++                android:propertyName="scaleY"
++                android:valueTo="1.06"
++                android:valueType="floatType" />
++        </set>
++    </item>
++    <item>
++        <set>
++            <objectAnimator
++                android:duration="150"
++                android:propertyName="scaleX"
++                android:valueTo="1.0"
++                android:valueType="floatType" />
++            <objectAnimator
++                android:duration="150"
++                android:propertyName="scaleY"
++                android:valueTo="1.0"
++                android:valueType="floatType" />
++        </set>
++    </item>
++</selector>
+diff --git a/app/src/main/res/color-night/tv_button_background.xml b/app/src/main/res/color-night/tv_button_background.xml
+new file mode 100644
+index 0000000..8c987d0
+--- /dev/null
++++ b/app/src/main/res/color-night/tv_button_background.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:color="#5976DF" android:state_focused="true" />
++    <item android:color="@android:color/transparent" />
++</selector>
+diff --git a/app/src/main/res/color-night/tv_button_stroke.xml b/app/src/main/res/color-night/tv_button_stroke.xml
+new file mode 100644
+index 0000000..8befe9a
+--- /dev/null
++++ b/app/src/main/res/color-night/tv_button_stroke.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:color="#FFFFFF" android:state_focused="true" />
++    <item android:color="#66FFFFFF" />
++</selector>
+diff --git a/app/src/main/res/color-night/tv_button_text.xml b/app/src/main/res/color-night/tv_button_text.xml
+new file mode 100644
+index 0000000..dda7fc3
+--- /dev/null
++++ b/app/src/main/res/color-night/tv_button_text.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:color="#FFFFFF" android:state_focused="true" />
++    <item android:color="#FFFFFF" />
++</selector>
+diff --git a/app/src/main/res/color/tv_button_background.xml b/app/src/main/res/color/tv_button_background.xml
+new file mode 100644
+index 0000000..8c987d0
+--- /dev/null
++++ b/app/src/main/res/color/tv_button_background.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:color="#5976DF" android:state_focused="true" />
++    <item android:color="@android:color/transparent" />
++</selector>
+diff --git a/app/src/main/res/color/tv_button_stroke.xml b/app/src/main/res/color/tv_button_stroke.xml
+new file mode 100644
+index 0000000..fd77489
+--- /dev/null
++++ b/app/src/main/res/color/tv_button_stroke.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:color="#FFFFFF" android:state_focused="true" />
++    <item android:color="#5976DF" />
++</selector>
+diff --git a/app/src/main/res/color/tv_button_text.xml b/app/src/main/res/color/tv_button_text.xml
+new file mode 100644
+index 0000000..fd77489
+--- /dev/null
++++ b/app/src/main/res/color/tv_button_text.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:color="#FFFFFF" android:state_focused="true" />
++    <item android:color="#5976DF" />
++</selector>
+diff --git a/app/src/main/res/drawable-xhdpi/tv_banner.png b/app/src/main/res/drawable-xhdpi/tv_banner.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..6f0c2a5096c49ee2d1aabf4edbc8a2dcd5687604
+GIT binary patch
+literal 13653
+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
+S)&Z@g0H`QxC{#kM!u}7c-93E(
+
+literal 0
+HcmV?d00001
+
+diff --git a/app/src/main/res/drawable/tv_item_background.xml b/app/src/main/res/drawable/tv_item_background.xml
+new file mode 100644
+index 0000000..02b08c1
+--- /dev/null
++++ b/app/src/main/res/drawable/tv_item_background.xml
+@@ -0,0 +1,22 @@
++<?xml version="1.0" encoding="utf-8"?>
++<ripple xmlns:android="http://schemas.android.com/apk/res/android"
++    android:color="?android:attr/colorControlHighlight">
++    <item>
++        <selector>
++            <item android:state_focused="true">
++                <shape android:shape="rectangle">
++                    <solid android:color="#335976DF" />
++                    <stroke
++                        android:width="3dp"
++                        android:color="#5976DF" />
++                    <corners android:radius="8dp" />
++                </shape>
++            </item>
++            <item>
++                <shape android:shape="rectangle">
++                    <solid android:color="@android:color/transparent" />
++                </shape>
++            </item>
++        </selector>
++    </item>
++</ripple>
+diff --git a/app/src/main/res/layout-television/activity_main.xml b/app/src/main/res/layout-television/activity_main.xml
+new file mode 100644
+index 0000000..165c181
+--- /dev/null
++++ b/app/src/main/res/layout-television/activity_main.xml
+@@ -0,0 +1,93 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++    Android TV layout: two columns, large D-pad friendly buttons, content kept
++    inside the overscan-safe area (48dp horizontal, 27dp vertical).
++    View ids that exist only here (settings_button, logs_button) are nullable
++    in ActivityMainBinding.
++-->
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:tools="http://schemas.android.com/tools"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:clipChildren="false"
++    android:clipToPadding="false"
++    android:gravity="center_vertical"
++    android:orientation="horizontal"
++    android:paddingStart="48dp"
++    android:paddingTop="27dp"
++    android:paddingEnd="48dp"
++    android:paddingBottom="27dp"
++    tools:context=".activities.MainActivity">
++
++    <LinearLayout
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_weight="1"
++        android:orientation="vertical">
++
++        <com.google.android.material.textview.MaterialTextView
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:text="@string/app_name"
++            android:textSize="48sp"
++            android:textStyle="bold" />
++
++        <com.google.android.material.textview.MaterialTextView
++            android:id="@+id/status_text"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="16dp"
++            android:textSize="28sp"
++            tools:text="@string/vpn_disconnected" />
++
++        <com.google.android.material.textview.MaterialTextView
++            android:id="@+id/proxy_address"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="4dp"
++            android:alpha="0.7"
++            android:textSize="20sp"
++            tools:text="127.0.0.1:1080" />
++    </LinearLayout>
++
++    <LinearLayout
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_weight="1"
++        android:clipChildren="false"
++        android:clipToPadding="false"
++        android:gravity="center_horizontal"
++        android:orientation="vertical"
++        android:padding="12dp">
++
++        <com.google.android.material.button.MaterialButton
++            android:id="@+id/status_button"
++            style="@style/Widget.ByeDPI.Button.Tv"
++            android:layout_width="320dp"
++            android:layout_height="wrap_content"
++            android:focusable="true"
++            android:textAllCaps="false"
++            tools:text="@string/vpn_connect">
++
++            <requestFocus />
++        </com.google.android.material.button.MaterialButton>
++
++        <com.google.android.material.button.MaterialButton
++            android:id="@+id/settings_button"
++            style="@style/Widget.ByeDPI.Button.Tv"
++            android:layout_width="320dp"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="16dp"
++            android:text="@string/title_settings"
++            android:textAllCaps="false" />
++
++        <com.google.android.material.button.MaterialButton
++            android:id="@+id/logs_button"
++            style="@style/Widget.ByeDPI.Button.Tv"
++            android:layout_width="320dp"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="16dp"
++            android:text="@string/save_logs"
++            android:textAllCaps="false" />
++    </LinearLayout>
++</LinearLayout>
+diff --git a/app/src/main/res/layout-television/activity_settings.xml b/app/src/main/res/layout-television/activity_settings.xml
+new file mode 100644
+index 0000000..8057f43
+--- /dev/null
++++ b/app/src/main/res/layout-television/activity_settings.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?>
++<androidx.fragment.app.FragmentContainerView xmlns:android="http://schemas.android.com/apk/res/android"
++    android:id="@+id/settings"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:clipToPadding="false"
++    android:paddingStart="48dp"
++    android:paddingTop="12dp"
++    android:paddingEnd="48dp"
++    android:paddingBottom="27dp" />
+diff --git a/app/src/main/res/values-television/bools.xml b/app/src/main/res/values-television/bools.xml
+new file mode 100644
+index 0000000..deb9486
+--- /dev/null
++++ b/app/src/main/res/values-television/bools.xml
+@@ -0,0 +1,4 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <bool name="is_tv">true</bool>
++</resources>
+diff --git a/app/src/main/res/values/bools.xml b/app/src/main/res/values/bools.xml
+new file mode 100644
+index 0000000..86326e3
+--- /dev/null
++++ b/app/src/main/res/values/bools.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <!-- Overridden in values-television. Used to switch on TV-specific behaviour. -->
++    <bool name="is_tv">false</bool>
++</resources>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index dc26369..19cbeac 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -1,6 +1,8 @@
+ <resources>
+     <string name="byedpi_docs">https://github.com/hufrea/byedpi/blob/v0.13/README.md</string>
+     <string name="app_name">ByeDPI</string>
++    <!-- Keep in sync with ByeDpiProxyCmdPreferences.DEFAULT_CMD_ARGS -->
++    <string name="byedpi_default_cmd_args" translatable="false">-Ku -a1 -An -d1 -s0+s -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -At,r,s -s1 -q1 -At,r,s -s5 -o25000+s -At,r,s -o1 -d1 -r1+s -t10 -b1500 -s0+s -d3+s -At,r,s -f-1 -r1+s -At,r,s -s1 -o1+s -s-1</string>
+     <string name="vpn_connect">Connect</string>
+     <string name="vpn_disconnect">Disconnect</string>
+     <string name="vpn_connected">Connected</string>
+@@ -16,6 +18,8 @@
+     <string name="save_logs">Save logs</string>
+     <string name="reset_settings">Reset</string>
+     <string name="logs_failed">Failed to collect logs</string>
++    <string name="logs_saved_to">Logs saved to %1$s</string>
++    <string name="reset_settings_confirm">Reset all settings to default?</string>
+     <string name="proxy_address">%1$s:%2$s</string>
+     <string name="theme_settings">Theme</string>
+     <string name="mode_setting">Mode</string>
+diff --git a/app/src/main/res/values/tv_styles.xml b/app/src/main/res/values/tv_styles.xml
+new file mode 100644
+index 0000000..434c440
+--- /dev/null
++++ b/app/src/main/res/values/tv_styles.xml
+@@ -0,0 +1,21 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <!-- Big, clearly focusable button for D-pad navigation. -->
++    <style name="Widget.ByeDPI.Button.Tv" parent="Widget.MaterialComponents.Button.OutlinedButton">
++        <item name="android:minHeight">64dp</item>
++        <item name="android:textSize">22sp</item>
++        <item name="android:textColor">@color/tv_button_text</item>
++        <item name="android:stateListAnimator">@animator/tv_focus_scale</item>
++        <item name="backgroundTint">@color/tv_button_background</item>
++        <item name="strokeColor">@color/tv_button_stroke</item>
++        <item name="strokeWidth">2dp</item>
++        <item name="cornerRadius">32dp</item>
++        <item name="rippleColor">@android:color/transparent</item>
++    </style>
++
++    <!-- Applied on TV only: visible focus highlight for list rows (preferences). -->
++    <style name="ThemeOverlay.ByeDPI.Tv" parent="">
++        <item name="android:selectableItemBackground">@drawable/tv_item_background</item>
++        <item name="selectableItemBackground">@drawable/tv_item_background</item>
++    </style>
++</resources>
+diff --git a/app/src/main/res/xml/byedpi_cmd_settings.xml b/app/src/main/res/xml/byedpi_cmd_settings.xml
+index fad9131..3199c47 100644
+--- a/app/src/main/res/xml/byedpi_cmd_settings.xml
++++ b/app/src/main/res/xml/byedpi_cmd_settings.xml
+@@ -16,6 +16,7 @@
+ 
+         <com.takisoft.preferencex.EditTextPreference
+             android:key="byedpi_cmd_args"
++            android:defaultValue="@string/byedpi_default_cmd_args"
+             android:title="@string/command_line_arguments"
+             android:dialogTitle="@string/command_line_arguments"
+             android:inputType="textMultiLine"
+diff --git a/app/src/main/res/xml/main_settings.xml b/app/src/main/res/xml/main_settings.xml
+index e81fc6b..7a10ed2 100644
+--- a/app/src/main/res/xml/main_settings.xml
++++ b/app/src/main/res/xml/main_settings.xml
+@@ -42,7 +42,7 @@
+         <SwitchPreference
+             android:key="byedpi_enable_cmd_settings"
+             android:title="@string/use_command_line_settings"
+-            android:defaultValue="false" />
++            android:defaultValue="true" />
+ 
+         <Preference
+             android:key="byedpi_ui_settings"
+@@ -78,4 +78,10 @@
+ 
+     </androidx.preference.PreferenceCategory>
+ 
++    <!-- The toolbar overflow menu is unreachable with a D-pad, so TV gets an in-list entry. -->
++    <Preference
++        android:key="reset_settings"
++        android:title="@string/reset_settings"
++        app:isPreferenceVisible="@bool/is_tv" />
++
+ </PreferenceScreen>

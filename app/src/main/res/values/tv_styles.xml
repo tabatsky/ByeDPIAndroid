@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Big, clearly focusable button for D-pad navigation. -->
+    <style name="Widget.ByeDPI.Button.Tv" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="android:minHeight">64dp</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:textColor">@color/tv_button_text</item>
+        <item name="android:stateListAnimator">@animator/tv_focus_scale</item>
+        <item name="backgroundTint">@color/tv_button_background</item>
+        <item name="strokeColor">@color/tv_button_stroke</item>
+        <item name="strokeWidth">2dp</item>
+        <item name="cornerRadius">32dp</item>
+        <item name="rippleColor">@android:color/transparent</item>
+    </style>
+
+    <!-- Applied on TV only: visible focus highlight for list rows (preferences). -->
+    <style name="ThemeOverlay.ByeDPI.Tv" parent="">
+        <item name="android:selectableItemBackground">@drawable/tv_item_background</item>
+        <item name="selectableItemBackground">@drawable/tv_item_background</item>
+    </style>
+</resources>

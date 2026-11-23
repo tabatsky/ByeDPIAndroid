@@ -2,6 +2,7 @@ package io.github.dovecoteescapee.byedpi.activities
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -27,6 +28,8 @@ import io.github.dovecoteescapee.byedpi.services.appStatus
 import io.github.dovecoteescapee.byedpi.utility.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
 
 class MainActivity : AppCompatActivity() {
@@ -122,9 +125,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyTvThemeOverlay()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // The TV layout (layout-television) has on-screen buttons instead of toolbar actions,
+        // which can't be reached with a D-pad.
+        val settingsButton = binding.settingsButton
+        val logsButton = binding.logsButton
+        if (settingsButton != null && logsButton != null) {
+            supportActionBar?.hide()
+            settingsButton.setOnClickListener { openSettings() }
+            logsButton.setOnClickListener { saveLogs() }
+        }
 
         val intentFilter = IntentFilter().apply {
             addAction(STARTED_BROADCAST)
@@ -176,34 +190,69 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        val (status, _) = appStatus
-
-        return when (item.itemId) {
+    override fun onOptionsItemSelected(item: MenuItem): Boolean =
+        when (item.itemId) {
             R.id.action_settings -> {
-                if (status == AppStatus.Halted) {
-                    val intent = Intent(this, SettingsActivity::class.java)
-                    startActivity(intent)
-                } else {
-                    Toast.makeText(this, R.string.settings_unavailable, Toast.LENGTH_SHORT)
-                        .show()
-                }
+                openSettings()
                 true
             }
 
             R.id.action_save_logs -> {
-                val intent =
-                    Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TITLE, "byedpi.log")
-                    }
-
-                logsRegister.launch(intent)
+                saveLogs()
                 true
             }
 
             else -> super.onOptionsItemSelected(item)
+        }
+
+    private fun openSettings() {
+        val (status, _) = appStatus
+
+        if (status == AppStatus.Halted) {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        } else {
+            Toast.makeText(this, R.string.settings_unavailable, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun saveLogs() {
+        val intent =
+            Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TITLE, "byedpi.log")
+            }
+
+        try {
+            logsRegister.launch(intent)
+        } catch (e: ActivityNotFoundException) {
+            // Most Android TV firmwares ship without a document picker.
+            Log.w(TAG, "No document picker available, saving logs to app storage", e)
+            saveLogsToAppStorage()
+        }
+    }
+
+    private fun saveLogsToAppStorage() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val logs = collectLogs()
+
+            val message = if (logs == null) {
+                getString(R.string.logs_failed)
+            } else {
+                try {
+                    val dir = getExternalFilesDir(null) ?: filesDir
+                    val file = File(dir, "byedpi.log")
+                    file.writeText(logs)
+                    getString(R.string.logs_saved_to, file.absolutePath)
+                } catch (e: IOException) {
+                    Log.e(TAG, "Failed to save logs", e)
+                    getString(R.string.logs_failed)
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+            }
         }
     }
 

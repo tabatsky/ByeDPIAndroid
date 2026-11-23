@@ -1,6 +1,8 @@
 <resources>
     <string name="byedpi_docs">https://github.com/hufrea/byedpi/blob/v0.13/README.md</string>
     <string name="app_name">ByeDPI</string>
+    <!-- Keep in sync with ByeDpiProxyCmdPreferences.DEFAULT_CMD_ARGS -->
+    <string name="byedpi_default_cmd_args" translatable="false">-Ku -a1 -An -d1 -s0+s -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -At,r,s -s1 -q1 -At,r,s -s5 -o25000+s -At,r,s -o1 -d1 -r1+s -t10 -b1500 -s0+s -d3+s -At,r,s -f-1 -r1+s -At,r,s -s1 -o1+s -s-1</string>
     <string name="vpn_connect">Connect</string>
     <string name="vpn_disconnect">Disconnect</string>
     <string name="vpn_connected">Connected</string>
@@ -16,6 +18,8 @@
     <string name="save_logs">Save logs</string>
     <string name="reset_settings">Reset</string>
     <string name="logs_failed">Failed to collect logs</string>
+    <string name="logs_saved_to">Logs saved to %1$s</string>
+    <string name="reset_settings_confirm">Reset all settings to default?</string>
     <string name="proxy_address">%1$s:%2$s</string>
     <string name="theme_settings">Theme</string>
     <string name="mode_setting">Mode</string>

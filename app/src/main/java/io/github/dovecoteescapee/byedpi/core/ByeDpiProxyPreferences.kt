@@ -7,7 +7,7 @@ import io.github.dovecoteescapee.byedpi.utility.shellSplit
 sealed interface ByeDpiProxyPreferences {
     companion object {
         fun fromSharedPreferences(preferences: SharedPreferences): ByeDpiProxyPreferences =
-            when (preferences.getBoolean("byedpi_enable_cmd_settings", false)) {
+            when (preferences.getBoolean("byedpi_enable_cmd_settings", true)) {
                 true -> ByeDpiProxyCmdPreferences(preferences)
                 false -> ByeDpiProxyUIPreferences(preferences)
             }
@@ -20,11 +20,15 @@ class ByeDpiProxyCmdPreferences(val args: Array<String>) : ByeDpiProxyPreference
     constructor(preferences: SharedPreferences) : this(
         preferences.getStringNotNull(
             "byedpi_cmd_args",
-            ""
+            DEFAULT_CMD_ARGS
         )
     )
 
     companion object {
+        /** Keep in sync with @string/byedpi_default_cmd_args. */
+        const val DEFAULT_CMD_ARGS =
+            "-Ku -a1 -An -d1 -s0+s -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -At,r,s -s1 -q1 -At,r,s -s5 -o25000+s -At,r,s -o1 -d1 -r1+s -t10 -b1500 -s0+s -d3+s -At,r,s -f-1 -r1+s -At,r,s -s1 -o1+s -s-1"
+
         private fun cmdToArgs(cmd: String): Array<String> {
             val firstArgIndex = cmd.indexOf("-")
             val argsStr = (if (firstArgIndex > 0) cmd.substring(firstArgIndex) else cmd).trim()

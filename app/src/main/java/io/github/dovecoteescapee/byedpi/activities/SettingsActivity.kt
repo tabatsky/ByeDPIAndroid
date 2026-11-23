@@ -7,11 +7,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.FragmentManager
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.fragments.MainSettingsFragment
+import io.github.dovecoteescapee.byedpi.utility.applyTvThemeOverlay
 import io.github.dovecoteescapee.byedpi.utility.getPreferences
 
 class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyTvThemeOverlay()
         setContentView(R.layout.activity_settings)
 
         supportFragmentManager
@@ -34,16 +36,20 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         R.id.action_reset_settings -> {
-            getPreferences().edit().clear().apply()
-
-            supportFragmentManager.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE)
-            supportFragmentManager
-                .beginTransaction()
-                .replace(R.id.settings, MainSettingsFragment())
-                .commit()
+            resetSettings()
             true
         }
 
         else -> super.onOptionsItemSelected(item)
+    }
+
+    fun resetSettings() {
+        getPreferences().edit().clear().apply()
+
+        supportFragmentManager.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE)
+        supportFragmentManager
+            .beginTransaction()
+            .replace(R.id.settings, MainSettingsFragment())
+            .commit()
     }
 }

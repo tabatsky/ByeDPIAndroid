@@ -5,8 +5,10 @@ import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.preference.*
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.github.dovecoteescapee.byedpi.BuildConfig
 import io.github.dovecoteescapee.byedpi.R
+import io.github.dovecoteescapee.byedpi.activities.SettingsActivity
 import io.github.dovecoteescapee.byedpi.data.Mode
 import io.github.dovecoteescapee.byedpi.utility.*
 
@@ -67,6 +69,19 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         }
 
         findPreferenceNotNull<Preference>("version").summary = BuildConfig.VERSION_NAME
+
+        // TV only (the preference is hidden elsewhere): the toolbar menu can't be reached with a D-pad.
+        findPreferenceNotNull<Preference>("reset_settings")
+            .setOnPreferenceClickListener {
+                MaterialAlertDialogBuilder(requireContext())
+                    .setMessage(R.string.reset_settings_confirm)
+                    .setPositiveButton(R.string.reset_settings) { _, _ ->
+                        (activity as? SettingsActivity)?.resetSettings()
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+                true
+            }
 
         updatePreferences()
     }
